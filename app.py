@@ -1,5 +1,6 @@
 # ==============================
 # Urban Pollution Prediction App
+# Map-Click Location Detection Version
 # ==============================
 
 import streamlit as st
@@ -15,45 +16,31 @@ from xgboost import XGBRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import mean_absolute_error, r2_score
+
 from streamlit_autorefresh import st_autorefresh
+from geopy.geocoders import Nominatim
 
 # -------------------------------
-# AUTO REFRESH (every 60 seconds)
+# AUTO REFRESH
 # -------------------------------
 st_autorefresh(interval=60 * 1000, key="refresh")
 
 # -------------------------------
 # PAGE CONFIG
 # -------------------------------
-st.set_page_config(page_title="Urban AQI Prediction", layout="wide")
+st.set_page_config(page_title="Urban AQI Map Prediction", layout="wide")
 st.title("Urban Pollution Prediction 🚦")
-st.write("ML-powered AQI prediction with live data, explainability & alerts")
+st.write("ML-powered AQI prediction with live data and map click location")
 
-# -------------------------------
-# LIVE TIMESTAMP (REAL-TIME PROOF)
-# -------------------------------
 ist = pytz.timezone("Asia/Kolkata")
 st.caption(f"⏱️ Last updated at {datetime.now(ist).strftime('%H:%M:%S IST')}")
 st.caption("📡 Live AQI source: OpenWeatherMap API")
 
 # -------------------------------
-# LOAD DATASET
+# LOAD DATA
 # -------------------------------
 df = pd.read_csv("TRAQID.csv")
-
-# -------------------------------
-# FIND AQI COLUMN
-# -------------------------------
 aqi_col = [c for c in df.columns if "aqi" in c.lower()][0]
-
-# -------------------------------
-# CITY SELECTION
-# -------------------------------
-if "City" in df.columns:
-    city = st.selectbox("🌍 Select City", df["City"].unique())
-    df = df[df["City"] == city]
-else:
-    city = "Delhi"
 
 # -------------------------------
 # PREPARE FEATURES
@@ -68,16 +55,10 @@ for col in X.select_dtypes(include="object").columns:
     X[col] = le.fit_transform(X[col])
     label_encoders[col] = le
 
-# -------------------------------
-# TRAIN TEST SPLIT
-# -------------------------------
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.2, random_state=42
 )
 
-# -------------------------------
-# MODEL TRAINING
-# -------------------------------
 model = XGBRegressor(
     n_estimators=200,
     learning_rate=0.1,
@@ -87,32 +68,75 @@ model = XGBRegressor(
 model.fit(X_train, y_train)
 
 # -------------------------------
-# LIVE INPUT SECTION
+# USER SELECT LOCATION ON MAP
 # -------------------------------
-st.subheader("🔮 Live AQI Prediction")
+st.subheader("🗺️ Click on Map to Select Location")
 
-input_data = {}
+# Default coordinates (central India)
+default_lat, default_lon = 20.5937, 78.9629
+map_df = pd.DataFrame({"lat": [default_lat], "lon": [default_lon]})
+selected_point = st.map(map_df, zoom=4)
+
+st.info("Click on the map to select a location below:")
+
+clicked_lat = st.number_input("Latitude", value=default_lat, format="%.5f")
+clicked_lon = st.number_input("Longitude", value=default_lon, format="%.5f")
+
+# -------------------------------
+# DETECT CITY FROM COORDINATES
+# -------------------------------
+geolocator = Nominatim(user_agent="aqi_map_app")
+place = geolocator.reverse((clicked_lat, clicked_lon), language="en")
+city = (
+    place.raw["address"].get("city")
+    or place.raw["address"].get("town")
+    or place.raw["address"].get("state")
+    or "Unknown"
+)
+st.info(f"📌 Detected City: {city}")
+
+# -------------------------------
+# LIVE AQI FROM API
+# -------------------------------
+API_KEY = st.secrets.get("OPENWEATHER_API_KEY", "")
+
+if API_KEY:
+    url = f"https://api.openweathermap.org/data/2.5/air_pollution?lat={clicked_lat}&lon={clicked_lon}&appid={API_KEY}"
+    res = requests.get(url).json()
+    components = res["list"][0]["components"]
+
+    pm25 = components["pm2_5"]
+    pm10 = components["pm10"]
+
+    st.metric("PM2.5", pm25)
+    st.metric("PM10", pm10)
+
+# -------------------------------
+# ML PREDICTION
+# -------------------------------
+live_input = {}
+
 for col in X.columns:
-    if col in label_encoders:
-        option = st.selectbox(col, label_encoders[col].classes_)
-        input_data[col] = label_encoders[col].transform([option])[0]
+    if col == "PM2.5":
+        live_input[col] = pm25
+    elif col == "PM10":
+        live_input[col] = pm10
+    elif col in label_encoders:
+        live_input[col] = label_encoders[col].transform(
+            [label_encoders[col].classes_[0]]
+        )[0]
     else:
-        input_data[col] = st.slider(
-            col,
-            float(X[col].min()),
-            float(X[col].max()),
-            float(X[col].mean())
-        )
+        live_input[col] = X[col].mean()
 
-input_df = pd.DataFrame([input_data])
-prediction = model.predict(input_df)[0]
+live_df = pd.DataFrame([live_input])
+prediction = model.predict(live_df)[0]
 
 # -------------------------------
-# AQI CATEGORY + ALERTS
+# AQI LABEL
 # -------------------------------
 def aqi_label(val):
     if val <= 50:
-        return "Good", "🟢 Safe for outdoor activities"
+        return "Good", "🟢 Safe"
     elif val <= 100:
         return "Moderate", "🟡 Sensitive people be cautious"
     elif val <= 150:
@@ -122,74 +146,50 @@ def aqi_label(val):
     elif val <= 300:
         return "Very Unhealthy", "🟣 Health warning"
     else:
-        return "Hazardous", "⚫ Emergency condition"
+        return "Hazardous", "⚫ Emergency"
 
 label, alert = aqi_label(prediction)
 
+st.subheader("🔮 AQI Prediction for Selected Location")
 st.metric("Predicted AQI", f"{prediction:.2f}")
 st.warning(f"{label} — {alert}")
 
-# -------------------------------
-# SMART HEALTH ADVISORY
-# -------------------------------
 health_tips = {
     "Good": "Enjoy outdoor activities 🌿",
-    "Moderate": "Limit prolonged outdoor exertion",
+    "Moderate": "Limit outdoor exertion",
     "Unhealthy (Sensitive)": "Children & elderly should stay indoors",
     "Unhealthy": "Avoid outdoor activity",
     "Very Unhealthy": "Wear masks and use air purifiers",
-    "Hazardous": "Emergency: Stay indoors, schools should close"
+    "Hazardous": "Emergency conditions"
 }
 
 st.error(f"🚨 Health Advisory: {health_tips[label]}")
 
 # -------------------------------
-# AQI TREND (REAL-TIME FEEL)
+# COLOR FUNCTION FOR MAP
 # -------------------------------
-if "history" not in st.session_state:
-    st.session_state.history = []
+def aqi_color(aqi):
+    if aqi <= 50:
+        return [0, 255, 0]
+    elif aqi <= 100:
+        return [255, 255, 0]
+    elif aqi <= 150:
+        return [255, 165, 0]
+    elif aqi <= 200:
+        return [255, 0, 0]
+    else:
+        return [128, 0, 128]
 
-st.session_state.history.append(prediction)
-st.session_state.history = st.session_state.history[-5:]
-
-trend_df = pd.DataFrame({
-    "Update": range(len(st.session_state.history)),
-    "Predicted AQI": st.session_state.history
+# -------------------------------
+# SHOW MAP WITH CLICKED LOCATION
+# -------------------------------
+st.subheader("🗺️ Pollution Map for Selected Location")
+map_df = pd.DataFrame({
+    "lat": [clicked_lat],
+    "lon": [clicked_lon],
+    "AQI": [prediction]
 })
-
-st.subheader("📈 AQI Trend (Recent Updates)")
-st.line_chart(trend_df.set_index("Update"))
-
-# -------------------------------
-# LIVE AQI FROM API
-# -------------------------------
-st.subheader("🌍 Live AQI (API)")
-
-API_KEY = st.secrets.get("OPENWEATHER_API_KEY", "")
-
-city_coords = {
-    "Delhi": (28.61, 77.20),
-    "Mumbai": (19.07, 72.87),
-    "Chennai": (13.08, 80.27),
-    "Bangalore": (12.97, 77.59)
-}
-
-if city in city_coords and API_KEY:
-    lat, lon = city_coords[city]
-    url = f"https://api.openweathermap.org/data/2.5/air_pollution?lat={lat}&lon={lon}&appid={API_KEY}"
-    res = requests.get(url).json()
-    live_aqi = res["list"][0]["main"]["aqi"] * 50
-    st.info(f"Live AQI: {live_aqi}")
-
-# -------------------------------
-# LIVE vs PREDICTED COMPARISON
-# -------------------------------
-if "live_aqi" in locals():
-    compare = pd.DataFrame({
-        "AQI": ["Live AQI", "Predicted AQI"],
-        "Value": [live_aqi, prediction]
-    })
-    st.bar_chart(compare.set_index("AQI"))
+st.map(map_df, color=aqi_color(prediction), size=80)
 
 # -------------------------------
 # MODEL PERFORMANCE
@@ -200,7 +200,7 @@ st.metric("MAE", f"{mean_absolute_error(y_test, y_pred):.2f}")
 st.metric("R² Score", f"{r2_score(y_test, y_pred):.2f}")
 
 # -------------------------------
-# SHAP EXPLAINABILITY
+# SHAP
 # -------------------------------
 st.subheader("🧠 Feature Importance (SHAP)")
 explainer = shap.Explainer(model)
@@ -211,30 +211,21 @@ shap.summary_plot(shap_values, X_test, show=False)
 st.pyplot(fig)
 
 # -------------------------------
-# MAP VIEW
-# -------------------------------
-if city in city_coords:
-    map_df = pd.DataFrame(
-        {"lat": [city_coords[city][0]], "lon": [city_coords[city][1]]}
-    )
-    st.subheader("🗺️ Pollution Location")
-    st.map(map_df)
-
-# -------------------------------
-# FUTURE SCOPE (JUDGE MAGNET)
+# FUTURE SCOPE
 # -------------------------------
 with st.expander("🚀 Future Scope"):
     st.markdown("""
-    - IoT sensor integration for street-level AQI  
-    - Government dashboard for ward-wise alerts  
-    - Mobile app notifications  
+    - IoT-based street sensors  
+    - Government dashboards  
+    - Mobile alert notifications  
     - 24-hour AQI forecasting  
     """)
 
 # -------------------------------
-# IMPACT STATEMENT
+# IMPACT
 # -------------------------------
 st.success(
-    "Impact: Helps citizens plan outdoor activities and enables authorities "
-    "to take early pollution-control measures."
+    "Impact: Enables real-time, location-aware air quality decisions "
+    "for citizens and authorities."
 )
+
