@@ -13,8 +13,8 @@ import matplotlib.pyplot as plt
 # -----------------------
 st.title("Urban Pollution Prediction 🚦")
 st.markdown(
-    "Predict AQI using environmental data and visualize feature importance with SHAP. "
-    "Select filters below to get dynamic predictions."
+    "Predict AQI using environmental data and visualize feature importance (SHAP) dynamically "
+    "for your selected inputs."
 )
 
 # -----------------------
@@ -35,22 +35,9 @@ if not aqi_cols:
 AQI_column = aqi_cols[0]
 
 # -----------------------
-# Identify city columns
-# -----------------------
-city_cols = [col for col in df.columns if col.startswith("City_")]
-if city_cols:
-    st.subheader("Select City")
-    city_options = [col.replace("City_", "") for col in city_cols]
-    selected_city = st.selectbox("City", city_options)
-    # Filter data for selected city
-    df = df[df[f"City_{selected_city}"] == 1].reset_index(drop=True)
-else:
-    selected_city = None
-
-# -----------------------
 # Prepare features and target
 # -----------------------
-drop_cols = ["Image", "created_at", "Sequence", "aqi_cat", AQI_column] + city_cols
+drop_cols = ["Image", "created_at", "Sequence", "aqi_cat", AQI_column]
 X = df.drop(columns=[col for col in drop_cols if col in df.columns])
 y = df[AQI_column]
 
@@ -80,16 +67,9 @@ model = XGBRegressor(
 model.fit(X_train, y_train)
 
 # -----------------------
-# Interactive filters
+# Interactive AQI prediction
 # -----------------------
-st.subheader("Predict AQI for Custom Inputs")
-
-# Function to inverse transform encoded categories
-def decode(col, val):
-    le = label_encoders.get(col)
-    if le:
-        return le.inverse_transform([val])[0]
-    return val
+st.subheader("Predict AQI for Custom Inputs (Live Update)")
 
 input_data = {}
 for col in X.columns:
@@ -98,30 +78,30 @@ for col in X.columns:
         selected = st.selectbox(f"{col}", options, key=f"input_{col}")
         input_data[col] = label_encoders[col].transform([selected])[0]
     else:
-        val = st.number_input(f"{col}", float(X[col].min()), float(X[col].max()), float(X[col].mean()))
+        val = st.slider(f"{col}", float(X[col].min()), float(X[col].max()), float(X[col].mean()))
         input_data[col] = val
 
-# Predict button
-if st.button("Predict AQI"):
-    input_df = pd.DataFrame([input_data])
-    prediction = model.predict(input_df)[0]
-    st.success(f"Predicted AQI: {prediction:.2f}")
+# Convert inputs to DataFrame
+input_df = pd.DataFrame([input_data])
+prediction = model.predict(input_df)[0]
+st.success(f"Predicted AQI: {prediction:.2f}")
 
 # -----------------------
-# Show sample predictions
+# SHAP per-input explanation
 # -----------------------
-st.subheader(f"Sample Predictions{' for ' + selected_city if selected_city else ''}")
-y_pred = model.predict(X_test)
-st.write(pd.DataFrame(y_pred, columns=["Predicted AQI"]).head(10))
-
-# -----------------------
-# SHAP feature importance
-# -----------------------
-st.subheader(f"Feature Importance (SHAP){' for ' + selected_city if selected_city else ''}")
+st.subheader("Feature Contribution (SHAP) for this Prediction")
 
 explainer = shap.Explainer(model)
-shap_values = explainer(X_test)
+shap_values_input = explainer(input_df)
 
+# Force matplotlib backend for Streamlit
 fig, ax = plt.subplots(figsize=(10, 6))
-shap.summary_plot(shap_values, X_test, show=False)
+shap.plots.bar(shap_values_input, show=False)
 st.pyplot(fig, bbox_inches='tight')
+
+# -----------------------
+# Sample predictions
+# -----------------------
+st.subheader("Sample Predictions")
+y_pred = model.predict(X_test)
+st.write(pd.DataFrame(y_pred, columns=["Predicted AQI"]).head(10))
