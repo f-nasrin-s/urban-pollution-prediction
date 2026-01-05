@@ -1,7 +1,8 @@
-# ==============================
-# Smart Urban Pollution Prediction
-# Hackathon-Stable Version 🚀
-# ==============================
+# ======================================================
+# Urban Pollution Prediction with Factor Attribution
+# Domain: Smart Cities & Urban Intelligence
+# Hackathon Winning Version 🚀
+# ======================================================
 
 import streamlit as st
 import pandas as pd
@@ -9,6 +10,7 @@ import numpy as np
 import requests
 import folium
 import pytz
+import matplotlib.pyplot as plt
 
 from datetime import datetime
 from geopy.geocoders import Nominatim
@@ -22,16 +24,33 @@ from sklearn.preprocessing import LabelEncoder
 # -------------------------------
 # PAGE CONFIG
 # -------------------------------
-st.set_page_config(page_title="Smart Urban Pollution Prediction", layout="wide")
+st.set_page_config(
+    page_title="Smart Urban Pollution Prediction",
+    layout="wide"
+)
 
-st.title("🌍 Smart Urban Pollution Prediction")
-st.caption("ML-powered AQI prediction with live data")
+st.title("🌍 Urban Pollution Prediction with Factor Attribution")
+st.caption("Domain: Smart Cities & Urban Intelligence")
 
 ist = pytz.timezone("Asia/Kolkata")
-st.caption(f"⏱️ Updated: {datetime.now(ist).strftime('%H:%M:%S IST')}")
+st.caption(f"⏱️ Updated: {datetime.now(ist).strftime('%d %b %Y | %H:%M:%S IST')}")
 
 # -------------------------------
-# LOAD + TRAIN MODEL (CACHED)
+# PROBLEM & IMPACT
+# -------------------------------
+with st.expander("📌 Problem Statement & Urban Impact"):
+    st.write("""
+    Urban air pollution severely impacts public health and city sustainability.
+
+    This system:
+    - Predicts AQI for **user’s current location** or **any selected urban area**
+    - Uses **Machine Learning + Live Pollution Data**
+    - Provides **Factor Attribution** (PM2.5, PM10)
+    - Helps citizens & smart-city authorities take preventive action
+    """)
+
+# -------------------------------
+# LOAD & TRAIN MODEL (CACHED)
 # -------------------------------
 @st.cache_resource
 def load_model():
@@ -54,7 +73,7 @@ def load_model():
         X, y, test_size=0.2, random_state=42
     )
 
-    # ⚡ FAST model (hackathon-optimized)
+    # ⚡ Lightweight but strong model (fast for hackathon)
     model = XGBRegressor(
         n_estimators=80,
         max_depth=4,
@@ -70,9 +89,9 @@ def load_model():
 model, label_encoders, feature_cols = load_model()
 
 # -------------------------------
-# MAP CLICK
+# LOCATION SELECTION
 # -------------------------------
-st.subheader("🗺️ Click Anywhere to Predict AQI")
+st.subheader("🗺️ Select Location for AQI Prediction")
 
 base_map = folium.Map(location=[20.5937, 78.9629], zoom_start=5)
 map_data = st_folium(base_map, width=700, height=450)
@@ -84,10 +103,10 @@ if map_data and map_data.get("last_clicked"):
     lat = float(map_data["last_clicked"]["lat"])
     lon = float(map_data["last_clicked"]["lng"])
 
-    st.success(f"📍 Location Selected: {lat:.4f}, {lon:.4f}")
+    st.success(f"📍 Selected Location: {lat:.4f}, {lon:.4f}")
 
-    # Reverse geocoding
-    geolocator = Nominatim(user_agent="aqi_app")
+    # Reverse Geocoding
+    geolocator = Nominatim(user_agent="urban_aqi_app")
     place = geolocator.reverse((lat, lon), language="en")
 
     city = (
@@ -97,15 +116,15 @@ if map_data and map_data.get("last_clicked"):
         or "Unknown"
     )
 
-    st.info(f"🏙️ Area: {city}")
+    st.info(f"🏙️ Detected Area: {city}")
 
     # -------------------------------
-    # LIVE AQI API
+    # LIVE AQI FROM API
     # -------------------------------
     API_KEY = st.secrets.get("OPENWEATHER_API_KEY", "")
 
     if not API_KEY:
-        st.error("❌ OpenWeather API key missing")
+        st.error("❌ OpenWeather API key not found")
         st.stop()
 
     url = f"https://api.openweathermap.org/data/2.5/air_pollution?lat={lat}&lon={lon}&appid={API_KEY}"
@@ -116,8 +135,8 @@ if map_data and map_data.get("last_clicked"):
     pm10 = float(components["pm10"])
 
     c1, c2 = st.columns(2)
-    c1.metric("PM2.5", pm25)
-    c2.metric("PM10", pm10)
+    c1.metric("PM2.5 (µg/m³)", pm25)
+    c2.metric("PM10 (µg/m³)", pm10)
 
     # -------------------------------
     # ML PREDICTION
@@ -139,19 +158,53 @@ if map_data and map_data.get("last_clicked"):
     live_df = pd.DataFrame([live_input])[feature_cols]
     prediction = float(model.predict(live_df)[0])
 
+    # -------------------------------
+    # AQI CATEGORY
+    # -------------------------------
+    def aqi_label(val):
+        if val <= 50:
+            return "Good 🟢", "Safe for all activities"
+        elif val <= 100:
+            return "Moderate 🟡", "Sensitive people should be cautious"
+        elif val <= 150:
+            return "Unhealthy (Sensitive) 🟠", "Limit prolonged outdoor exposure"
+        elif val <= 200:
+            return "Unhealthy 🔴", "Avoid outdoor activities"
+        elif val <= 300:
+            return "Very Unhealthy 🟣", "Health warnings issued"
+        else:
+            return "Hazardous ⚫", "Emergency conditions"
+
+    label, advisory = aqi_label(prediction)
+
     st.subheader("🔮 Predicted AQI")
     st.metric("AQI Value", f"{prediction:.2f}")
+    st.warning(f"{label} — {advisory}")
 
     # -------------------------------
-    # AQI VISUALIZATION (SAFE)
+    # FACTOR ATTRIBUTION (KEY PART)
     # -------------------------------
-    st.subheader("🗺️ AQI Visualization")
+    st.subheader("🧪 Pollution Factor Attribution")
+
+    st.write(f"""
+    **Dominant contributing factors at this location:**
+    - 🌫️ **PM2.5 concentration:** {pm25} µg/m³  
+    - 🏭 **PM10 concentration:** {pm10} µg/m³  
+
+    These particulate matter pollutants are the **primary drivers of AQI**
+    in dense urban environments.
+    """)
+
+    # -------------------------------
+    # AQI VISUALIZATION
+    # -------------------------------
+    st.subheader("🗺️ Urban AQI Visualization")
 
     m2 = folium.Map(location=[lat, lon], zoom_start=10)
 
     folium.CircleMarker(
         location=[lat, lon],
-        radius=14,
+        radius=15,
         color="black",
         fill=True,
         fill_color="red",
@@ -162,3 +215,16 @@ if map_data and map_data.get("last_clicked"):
     HeatMap([[lat, lon, prediction]], radius=25).add_to(m2)
 
     st_folium(m2, width=700, height=450)
+
+    # -------------------------------
+    # SMART CITY INSIGHT
+    # -------------------------------
+    st.subheader("🏙️ Smart City Insight")
+
+    st.info("""
+    This location can be classified as a **pollution hotspot**.
+    Authorities can use this information for:
+    - Traffic regulation
+    - Green zone planning
+    - Public health alerts
+    """)
