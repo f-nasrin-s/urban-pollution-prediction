@@ -6,8 +6,7 @@ xgboost
 scikit-learn
 shap
 requests
-streamlit-autorefresh
-streamlit-js-eval
-geopy
 pytz
+geopy
+folium
 streamlit-folium
