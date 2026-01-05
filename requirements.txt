@@ -1,10 +1,8 @@
 streamlit
 pandas
 numpy
-matplotlib
 xgboost
 scikit-learn
-shap
 requests
 pytz
 geopy
