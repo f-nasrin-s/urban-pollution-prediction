@@ -118,7 +118,11 @@ def prepare_input(pm25_val, pm10_val):
         elif col.lower() == "pm10":
             row[col] = pm10_val
         elif col in df.columns:
-            row[col] = df[col].median()
+            # Only numeric columns can use median
+            if pd.api.types.is_numeric_dtype(df[col]):
+                row[col] = df[col].median()
+            else:
+                row[col] = 0  # Default for non-numeric columns
         else:
             row[col] = 0
     return row
