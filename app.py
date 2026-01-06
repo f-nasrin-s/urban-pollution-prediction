@@ -9,6 +9,7 @@ import numpy as np
 import requests
 import folium
 import pytz
+import streamlit.components.v1 as components
 
 from datetime import datetime
 from streamlit_folium import st_folium
@@ -21,7 +22,7 @@ from sklearn.model_selection import train_test_split
 # ------------------ PAGE CONFIG ------------------
 st.set_page_config(page_title="Smart City Pollution AI", layout="wide")
 st.title("🏙️ Smart City Pollution AI – Command Center")
-st.caption("AI Prediction • Health Risk • Policy Simulation • Interactive Insights")
+st.caption("AI Prediction • Health Risk • Policy Simulation • Smart City Insights")
 
 ist = pytz.timezone("Asia/Kolkata")
 st.caption(f"⏱️ {datetime.now(ist).strftime('%d %b %Y | %H:%M:%S IST')}")
@@ -57,18 +58,56 @@ def train_model():
 
 model, features = train_model()
 
+# ------------------ GPS FUNCTION ------------------
+def gps_button():
+    html = """
+    <script>
+    navigator.geolocation.getCurrentPosition(
+        (pos) => {
+            const data = pos.coords.latitude + "," + pos.coords.longitude;
+            const input = window.parent.document.querySelector(
+                'input[data-testid="stTextInput"]'
+            );
+            input.value = data;
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        },
+        () => {}
+    );
+    </script>
+    """
+    components.html(html)
+
 # ------------------ LOCATION SELECTION ------------------
-st.subheader("📍 Select Location (India)")
+st.subheader("📍 Location Selection")
 
-m = folium.Map(location=[20.5937, 78.9629], zoom_start=5)
-map_data = st_folium(m, height=420)
+mode = st.radio(
+    "Choose location method:",
+    ["🗺️ Select on Map (Recommended)", "📌 Auto Detect (GPS – Optional)"]
+)
 
-if not map_data or not map_data.get("last_clicked"):
-    st.info("Click anywhere on the map to select a location")
+lat, lon = None, None
+
+if mode == "📌 Auto Detect (GPS – Optional)":
+    st.info("Click the button and allow browser location access")
+    gps_val = st.text_input("GPS Output", placeholder="Waiting for permission...")
+    if st.button("📍 Detect My Location"):
+        gps_button()
+
+    if gps_val:
+        lat, lon = map(float, gps_val.split(","))
+        st.success(f"Detected → {lat:.4f}, {lon:.4f}")
+
+if mode == "🗺️ Select on Map (Recommended)":
+    m = folium.Map(location=[20.5937, 78.9629], zoom_start=5)
+    data = st_folium(m, height=420)
+
+    if data and data.get("last_clicked"):
+        lat = data["last_clicked"]["lat"]
+        lon = data["last_clicked"]["lng"]
+        st.success(f"Selected → {lat:.4f}, {lon:.4f}")
+
+if lat is None or lon is None:
     st.stop()
-
-lat = map_data["last_clicked"]["lat"]
-lon = map_data["last_clicked"]["lng"]
 
 # ------------------ CITY NAME ------------------
 API_KEY = st.secrets.get("OPENWEATHER_API_KEY", "")
@@ -103,15 +142,14 @@ for col in features:
 predicted_aqi = float(model.predict(pd.DataFrame([row]))[0])
 risk_score = min(100, int(predicted_aqi / 3))
 
-# ------------------ RESULTS ------------------
 st.subheader("🔮 AQI Prediction")
 st.metric("Predicted AQI", round(predicted_aqi, 2))
 st.metric("Urban Risk Index", f"{risk_score}/100")
 
-# ------------------ HEALTH IMPACT ANALYSIS ------------------
+# ------------------ HEALTH IMPACTS ------------------
 st.subheader("❤️ Health Impact Assessment")
 
-health_impact = {
+health = {
     "Children": "Low",
     "Elderly": "Low",
     "Asthma Patients": "Low",
@@ -119,36 +157,36 @@ health_impact = {
 }
 
 if predicted_aqi > 180:
-    health_impact.update({
+    health.update({
         "Children": "Severe",
         "Elderly": "Severe",
         "Asthma Patients": "Very Severe",
         "General Public": "High"
     })
 elif predicted_aqi > 120:
-    health_impact.update({
+    health.update({
         "Children": "High",
         "Elderly": "High",
         "Asthma Patients": "Severe",
         "General Public": "Moderate"
     })
 elif predicted_aqi > 80:
-    health_impact.update({
+    health.update({
         "Children": "Moderate",
         "Elderly": "Moderate",
         "Asthma Patients": "High",
         "General Public": "Low"
     })
 
-for group, risk in health_impact.items():
-    if risk in ["Very Severe", "Severe"]:
-        st.error(f"**{group}** → {risk} risk")
-    elif risk == "High":
-        st.warning(f"**{group}** → {risk} risk")
-    elif risk == "Moderate":
-        st.info(f"**{group}** → {risk} risk")
+for k, v in health.items():
+    if v in ["Very Severe", "Severe"]:
+        st.error(f"**{k}** → {v} risk")
+    elif v == "High":
+        st.warning(f"**{k}** → {v} risk")
+    elif v == "Moderate":
+        st.info(f"**{k}** → {v} risk")
     else:
-        st.success(f"**{group}** → {risk} risk")
+        st.success(f"**{k}** → {v} risk")
 
 # ------------------ WHAT-IF SIMULATION ------------------
 st.subheader("🧠 What-If Pollution Control Simulation")
@@ -188,26 +226,26 @@ st_folium(m2, height=420)
 st.subheader("🤖 AI Recommended Actions")
 
 if predicted_aqi > 180:
-    st.error("🚨 Emergency: Stop outdoor activities, restrict traffic, halt construction")
+    st.error("🚨 Emergency: Restrict traffic, stop construction, issue public alerts")
 elif predicted_aqi > 120:
-    st.warning("⚠️ Advisory: Reduce traffic, promote remote work, monitor hotspots")
+    st.warning("⚠️ Advisory: Control congestion, promote remote work")
 else:
-    st.success("✅ Safe: Encourage green mobility and public transport")
+    st.success("✅ Safe: Encourage green mobility")
 
 # ------------------ CHATBOT ------------------
 st.subheader("💬 Ask the Pollution AI")
 
-q = st.text_input("Ask about AQI, PM2.5, PM10, or health risk")
+q = st.text_input("Ask about AQI, PM2.5, PM10 or health risks")
 
 if q:
     q = q.lower()
     if "aqi" in q:
-        st.info(f"Predicted AQI at this location is {round(predicted_aqi,2)}")
+        st.info(f"Predicted AQI is {round(predicted_aqi,2)}")
     elif "pm2.5" in q:
         st.info(f"PM2.5 level is {round(pm25,2)} µg/m³")
     elif "pm10" in q:
         st.info(f"PM10 level is {round(pm10,2)} µg/m³")
     elif "health" in q or "risk" in q:
-        st.info(", ".join([f"{k}: {v}" for k,v in health_impact.items()]))
+        st.info(", ".join([f"{k}: {v}" for k,v in health.items()]))
     else:
         st.info("Try asking about AQI, PM2.5, PM10 or health risks.")
