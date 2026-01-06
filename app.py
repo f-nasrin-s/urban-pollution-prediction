@@ -1,8 +1,5 @@
 # ============================================================
 # SMART CITY AI – URBAN POLLUTION COMMAND CENTER
-# Domain: Smart Cities & Urban Intelligence
-# Ultimate Hackathon Version 🏆
-# Features: Auto-detect, Map click, What-If Simulation, AI Recommendations, Health Score, Chatbot
 # ============================================================
 
 import streamlit as st
@@ -11,6 +8,7 @@ import numpy as np
 import requests
 import folium
 import pytz
+import matplotlib.pyplot as plt
 
 from datetime import datetime
 from streamlit_folium import st_folium
@@ -28,7 +26,7 @@ st.caption("AI Prediction • Factor Attribution • Health Risk • Policy Simu
 ist = pytz.timezone("Asia/Kolkata")
 st.caption(f"⏱️ System Time: {datetime.now(ist).strftime('%d %b %Y | %H:%M:%S IST')}")
 
-# ------------------ MODEL TRAINING ------------------
+# ------------------ LOAD DATA & TRAIN MODEL ------------------
 @st.cache_resource
 def train_model():
     df = pd.read_csv("TRAQID.csv")
@@ -57,9 +55,9 @@ def train_model():
         random_state=42
     )
     model.fit(X_train, y_train)
-    return model, encoders, X.columns.tolist()
+    return model, encoders, X.columns.tolist(), df
 
-model, encoders, features = train_model()
+model, encoders, features, df = train_model()
 
 # ------------------ LOCATION SELECTION ------------------
 st.subheader("📍 Location Selection")
@@ -111,24 +109,31 @@ c1, c2 = st.columns(2)
 c1.metric("PM2.5 (µg/m³)", pm25)
 c2.metric("PM10 (µg/m³)", pm10)
 
-# ------------------ AQI PREDICTION ------------------
-row = {}
-for col in features:
-    if col.lower() == "pm2.5":
-        row[col] = pm25
-    elif col.lower() == "pm10":
-        row[col] = pm10
-    else:
-        row[col] = 0
+# ------------------ PREPARE INPUT ROW ------------------
+def prepare_input(pm25_val, pm10_val):
+    row = {}
+    for col in features:
+        if col.lower() == "pm2.5":
+            row[col] = pm25_val
+        elif col.lower() == "pm10":
+            row[col] = pm10_val
+        elif col in df.columns:
+            row[col] = df[col].median()
+        else:
+            row[col] = 0
+    return row
 
+row = prepare_input(pm25, pm10)
 predicted_aqi = float(model.predict(pd.DataFrame([row]))[0])
 
 # ------------------ ADVANCED ANALYTICS ------------------
 risk_score = min(100, round(predicted_aqi / 3))
 source = "🚗 Traffic & Combustion" if pm25 > 1.3*pm10 else ("🏗️ Dust / Construction" if pm10>1.3*pm25 else "🏭 Mixed Emissions")
-health_risk = {"Children": "High" if predicted_aqi>120 else "Moderate",
-               "Elderly": "High" if predicted_aqi>100 else "Moderate",
-               "Asthma Patients": "Severe" if predicted_aqi>90 else "Moderate"}
+health_risk = {
+    "Children": "High" if predicted_aqi>120 else "Moderate",
+    "Elderly": "High" if predicted_aqi>100 else "Moderate",
+    "Asthma Patients": "Severe" if predicted_aqi>90 else "Moderate"
+}
 
 # ------------------ DISPLAY RESULTS ------------------
 st.subheader("🔮 AQI Prediction")
@@ -143,20 +148,32 @@ st.subheader("❤️ Health Impact")
 for k,v in health_risk.items():
     st.write(f"- **{k}** → {v} risk")
 
-# ------------------ WHAT-IF SIMULATION ------------------
+# ------------------ WHAT-IF SIMULATION WITH CHART ------------------
 st.subheader("🧠 What-If Simulation")
 traffic = st.slider("🚗 Traffic Reduction (%)", 0, 50, 0)
 construction = st.slider("🏗️ Construction Reduction (%)", 0, 50, 0)
+reset_btn = st.button("🔄 Reset to Current AQI")
 
-sim_pm25 = pm25*(1-traffic/200)
-sim_pm10 = pm10*(1-construction/200)
+# Apply reset or slider reductions
+if reset_btn:
+    sim_pm25 = pm25
+    sim_pm10 = pm10
+else:
+    sim_pm25 = pm25 * (1 - traffic/100)
+    sim_pm10 = pm10 * (1 - construction/100)
 
-sim_row = row.copy()
-sim_row[next(k for k in row if k.lower()=="pm2.5")] = sim_pm25
-sim_row[next(k for k in row if k.lower()=="pm10")] = sim_pm10
-
+sim_row = prepare_input(sim_pm25, sim_pm10)
 sim_aqi = model.predict(pd.DataFrame([sim_row]))[0]
+
 st.metric("Simulated AQI", round(sim_aqi,2))
+st.write(f"**Change vs Current AQI:** {round(sim_aqi - predicted_aqi,2)}")
+
+# Plot AQI comparison chart
+fig, ax = plt.subplots()
+ax.bar(["Current AQI", "Simulated AQI"], [predicted_aqi, sim_aqi], color=["blue","orange"])
+ax.set_ylabel("AQI")
+ax.set_title("Predicted vs Simulated AQI")
+st.pyplot(fig)
 
 # ------------------ HOTSPOT MAP ------------------
 st.subheader("🗺️ Pollution Hotspot Map")
@@ -191,4 +208,4 @@ if user_q:
         response = "Health risk: " + ", ".join([f"{k}: {v}" for k,v in health_risk.items()])
     else:
         response = "This is a Smart City Pollution AI. Ask about AQI, PM2.5, PM10, or health risks."
-    st.info(response)     
+    st.info(response)
